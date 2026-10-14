@@ -1,0 +1,6 @@
+{
+  "name": "Portal da Transparência - São Miguel do Tocantins",
+  "description": "Portal da Transparência da Prefeitura Municipal de São Miguel do Tocantins - TO. Acompanhe a aplicação dos recursos públicos municipais.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
