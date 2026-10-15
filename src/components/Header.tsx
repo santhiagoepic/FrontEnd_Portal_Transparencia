@@ -1,6 +1,7 @@
 import React from 'react';
-import { User, Contrast, Accessibility as AccessibilityIcon, Menu, X } from 'lucide-react';
+import { User, Contrast, Accessibility as AccessibilityIcon, Menu, X, LayoutDashboard, LogOut } from 'lucide-react';
 import { Brasao } from './Brasao.tsx';
+import { useAuth } from '../context/AuthContext';
 
 interface HeaderProps {
   activeTab: string;
@@ -11,6 +12,7 @@ interface HeaderProps {
   isHighContrast: boolean;
   fontSize: number;
   onChangeFontSize: (delta: number) => void;
+  onNavigateToDashboard?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,7 +23,9 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleHighContrast,
   isHighContrast,
   onChangeFontSize,
+  onNavigateToDashboard,
 }) => {
+  const { currentUser, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
   const navLinks = [
@@ -130,14 +134,57 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Acessibilidade</span>
             </button>
 
-            {/* Login Button - ALWAYS VISIBLE, NEVER OVERFLOWS */}
-            <button
-              onClick={onOpenLogin}
-              className="bg-[#0b5444] hover:bg-[#084336] text-white px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>Entrar</span>
-            </button>
+            {/* Admin User Status or Login Button */}
+            {currentUser ? (
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {/* Dashboard button */}
+                <button
+                  onClick={onNavigateToDashboard}
+                  className="bg-[#0b5444] hover:bg-[#084336] text-white px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                  title="Acessar Dashboard Administrativo"
+                >
+                  <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-300" />
+                  <span className="hidden sm:inline">Dashboard</span>
+                </button>
+
+                {/* Profile Pill */}
+                <div className="hidden md:flex items-center gap-1.5 bg-slate-100 border border-slate-200/90 px-2.5 py-1 rounded-xl text-xs">
+                  <span
+                    className={`text-[9.5px] font-extrabold px-1.5 py-0.5 rounded ${
+                      currentUser.role === 'MASTER'
+                        ? 'bg-emerald-700 text-white'
+                        : currentUser.role === 'ADMIN'
+                        ? 'bg-blue-700 text-white'
+                        : 'bg-purple-700 text-white'
+                    }`}
+                  >
+                    {currentUser.role}
+                  </span>
+                  <span className="font-semibold text-slate-800 text-[11px] truncate max-w-[100px]">
+                    {currentUser.name.split(' ')[0]}
+                  </span>
+                </div>
+
+                {/* Logout Button */}
+                <button
+                  onClick={logout}
+                  className="p-1.5 sm:p-2 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition cursor-pointer"
+                  title="Sair da Sessão Administrativa"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              /* Administrative Login Button */
+              <button
+                onClick={onOpenLogin}
+                className="bg-[#0b5444] hover:bg-[#084336] text-white px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                title="Acesso Administrativo (Servidores)"
+              >
+                <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span>Entrar</span>
+              </button>
+            )}
 
             {/* Mobile / Tablet Menu Button (visible on screens < 1280px) */}
             <button

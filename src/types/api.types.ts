@@ -95,4 +95,6 @@ export interface DocumentoOficialDTO {
   signatario?: string;
   cargoSignatario?: string;
   textoIntegral?: string;
+  categoria?: string;
 }
+

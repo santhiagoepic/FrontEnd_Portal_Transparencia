@@ -40,30 +40,29 @@ export const QuickAccessDrawer: React.FC<QuickAccessDrawerProps> = ({
 
   return (
     <>
-      {/* 1. Sleek Floating Lateral Button - Lightning bolt (raio) icon ALWAYS 100% VISIBLE on right edge */}
+      {/* 1. Sleek Floating Lateral Tab - Permanent Vertical Tab as in User Reference Image */}
       <aside 
         aria-label="Acesso Rápido e Dúvidas"
-        className="fixed right-0 top-1/2 -translate-y-1/2 z-40"
+        className="fixed right-0 top-1/2 -translate-y-1/2 z-40 select-none"
       >
         <button
           onClick={onOpen}
-          className="bg-[#0c2340] hover:bg-[#064e3b] text-white shadow-2xl rounded-l-2xl pl-3 pr-2.5 py-3 flex items-center gap-2.5 cursor-pointer border-l-2 border-y border-amber-400/90 transition-all transform hover:-translate-x-1 group"
-          title="Acesso Rápido e Dúvidas - Clique para abrir"
-          aria-label="Acesso Rápido"
+          className="bg-[#0c2340] hover:bg-[#071a30] text-white shadow-2xl rounded-l-2xl border-l-[2.5px] border-y-2 border-amber-400 pt-2.5 pb-4 px-1.5 flex flex-col items-center gap-2.5 cursor-pointer transition-all duration-200 transform hover:-translate-x-1 group focus:outline-none focus:ring-2 focus:ring-amber-400"
+          title="Acesso Rápido - Clique para abrir o menu"
+          aria-label="Acesso Rápido - Clique para abrir o menu"
         >
-          {/* ÍCONE DE RAIO (LIGHTNING BOLT) SEMPRE VISÍVEL */}
-          <div className="w-9 h-9 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center shrink-0 shadow-md group-hover:scale-110 group-hover:bg-amber-300 transition-all">
-            <Zap className="w-5 h-5 fill-slate-950 text-slate-950" />
+          {/* Quadrado âmbar arredondado com o raio preto idêntico à imagem */}
+          <div className="w-7 h-7 rounded-lg bg-amber-400 text-slate-950 flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 group-hover:bg-amber-300 transition-transform">
+            <Zap className="w-4 h-4 fill-slate-950 text-slate-950 stroke-[2.5]" />
           </div>
 
-          <div className="hidden sm:flex flex-col items-start text-left select-none pr-1">
-            <span className="text-[11px] font-black uppercase tracking-wider text-white leading-tight">
-              Acesso
-            </span>
-            <span className="text-[10px] font-bold text-amber-300 leading-tight">
-              Rápido
-            </span>
-          </div>
+          {/* Texto ACESSO RÁPIDO na vertical idêntico à imagem */}
+          <span 
+            style={{ writingMode: 'vertical-rl' }}
+            className="text-[10.5px] font-black uppercase tracking-widest text-amber-400 select-none whitespace-nowrap group-hover:text-amber-300 transition-colors"
+          >
+            ACESSO RÁPIDO
+          </span>
         </button>
       </aside>
 

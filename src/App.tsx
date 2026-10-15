@@ -18,9 +18,11 @@ import { DetailModal } from './components/DetailModal.tsx';
 import { LoginModal } from './components/LoginModal.tsx';
 import { AccessibilityModal } from './components/AccessibilityModal.tsx';
 import { Footer } from './components/Footer.tsx';
+import { AuthProvider } from './context/AuthContext';
+import { DashboardView } from './components/admin/DashboardView';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'group'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'group' | 'dashboard'>('home');
   const [selectedGroupId, setSelectedGroupId] = useState('institucional');
   const [selectedGroupSubItem, setSelectedGroupSubItem] = useState<string | undefined>(undefined);
 
@@ -147,11 +149,20 @@ export default function App() {
           isHighContrast={isHighContrast}
           fontSize={fontSize}
           onChangeFontSize={handleChangeFontSize}
+          onNavigateToDashboard={() => setCurrentView('dashboard')}
         />
 
         {/* Main Container */}
         <main className="flex-1 w-full mx-auto">
-          {currentView === 'home' ? (
+          {currentView === 'dashboard' ? (
+            /* Dedicated Administrative Dashboard (Requirement 4) */
+            <DashboardView
+              onNavigateToGroup={(groupId, subItem) => {
+                handleSelectGroup(groupId, subItem);
+              }}
+              onOpenPublicPortal={() => setCurrentView('home')}
+            />
+          ) : currentView === 'home' ? (
             <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 xl:pr-12">
               {/* 2. Hero Section: Welcome & Search Box */}
               <HeroSection
@@ -238,10 +249,11 @@ export default function App() {
           subCategory={modalSubCategory}
         />
 
-        {/* Login Modal */}
+        {/* Administrative Login Modal (Requirement 3: Redirects to Dashboard upon successful login) */}
         <LoginModal
           isOpen={loginOpen}
           onClose={() => setLoginOpen(false)}
+          onSuccessLogin={() => setCurrentView('dashboard')}
         />
 
         {/* Accessibility Modal */}

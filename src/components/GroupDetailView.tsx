@@ -23,7 +23,11 @@ import {
   AlertCircle,
   FileQuestion,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  PlusCircle,
+  Trash2,
+  Upload,
+  FolderOpen
 } from 'lucide-react';
 import { Brasao } from './Brasao.tsx';
 import { GROUP_CONFIGS } from '../config/navigation.config';
@@ -32,6 +36,9 @@ import { DocumentoOficialDTO } from '../types/api.types';
 import { useToast } from './Toast';
 import { TableSkeleton } from './Skeleton';
 import { siteConfig } from '../config/site.config';
+import { useAuth } from '../context/AuthContext';
+import { CreatePublicationModal } from './admin/CreatePublicationModal';
+import { MultiDocumentList } from './documents/MultiDocumentList';
 
 interface GroupDetailViewProps {
   groupId: string;
@@ -47,7 +54,16 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
   onSelectAnotherGroup,
 }) => {
   const { success, info, error: toastError } = useToast();
+  const { currentUser, hasPermission, addAuditLog } = useAuth();
   const [, startTransition] = useTransition();
+
+  // Granular permissions for current module
+  const canViewAdmin = hasPermission(groupId, 'view_admin');
+  const canCreate = hasPermission(groupId, 'create');
+  const canEdit = hasPermission(groupId, 'edit');
+  const canDeleteRecords = hasPermission(groupId, 'delete_records');
+  const canReplaceFiles = hasPermission(groupId, 'replace_files');
+  const canDeleteFiles = hasPermission(groupId, 'delete_files');
 
   // Get configuration and theme for the active group
   const config = GROUP_CONFIGS[groupId] || GROUP_CONFIGS['atos-normativos'];
@@ -91,8 +107,46 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
     ano: selectedAno,
   });
 
+  // Local state for documents (to reflect newly added or deleted items immediately)
+  const [localDocs, setLocalDocs] = useState<DocumentoOficialDTO[]>([]);
+
+  useEffect(() => {
+    setLocalDocs(documents);
+  }, [documents]);
+
   // View mode: 'list' (Image 2) or 'detail' (Image 3)
   const [selectedDoc, setSelectedDoc] = useState<DocumentoOficialDTO | null>(null);
+
+  // Inline editing state for selectedDoc (Requirement 7: No "Editar" button! Fields are immediately editable for authorized admins)
+  const [editNumero, setEditNumero] = useState('');
+  const [editAno, setEditAno] = useState('');
+  const [editSecao, setEditSecao] = useState('');
+  const [editAssinatura, setEditAssinatura] = useState('');
+  const [editEmenta, setEditEmenta] = useState('');
+  const [editSignatario, setEditSignatario] = useState('');
+  const [editCargo, setEditCargo] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+
+  // Synchronize editing fields and unblur PDF directly if authorized admin
+  useEffect(() => {
+    if (selectedDoc) {
+      setEditNumero(selectedDoc.numero);
+      setEditAno(selectedDoc.ano);
+      setEditSecao(selectedDoc.secao || '');
+      setEditAssinatura(selectedDoc.assinatura);
+      setEditEmenta(selectedDoc.ementa);
+      setEditSignatario(selectedDoc.signatario || '');
+      setEditCargo(selectedDoc.cargoSignatario || '');
+
+      // Requirement 8: For authorized admin, PDF is immediately available without blur!
+      if (canEdit || canViewAdmin) {
+        setIsPdfBlurred(false);
+      } else {
+        setIsPdfBlurred(true);
+      }
+    }
+  }, [selectedDoc, canEdit, canViewAdmin]);
 
   // PDF Viewer State (Blur toggle, zoom, rotation)
   const [isPdfBlurred, setIsPdfBlurred] = useState<boolean>(true);
@@ -110,7 +164,7 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
   const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
 
   // Filtered documents list (applying client-side COVID or other fast filters)
-  const filteredDocs = documents.filter((doc) => {
+  const filteredDocs = localDocs.filter((doc) => {
     if (covidFilter) {
       const isCovid = doc.ementa.toLowerCase().includes('covid') || 
                       doc.secao.toLowerCase().includes('covid');
@@ -118,6 +172,115 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
     }
     return true;
   });
+
+  // Save changes handler (Idempotent: Requirement 7.2 & 7.3)
+  const handleSaveDoc = () => {
+    if (!selectedDoc) return;
+    setIsSaving(true);
+
+    setTimeout(() => {
+      const hasChanged = 
+        editNumero !== selectedDoc.numero ||
+        editAno !== selectedDoc.ano ||
+        editSecao !== (selectedDoc.secao || '') ||
+        editAssinatura !== selectedDoc.assinatura ||
+        editEmenta !== selectedDoc.ementa ||
+        editSignatario !== (selectedDoc.signatario || '') ||
+        editCargo !== (selectedDoc.cargoSignatario || '');
+
+      if (hasChanged) {
+        const updatedDoc: DocumentoOficialDTO = {
+          ...selectedDoc,
+          numero: editNumero || selectedDoc.numero,
+          ano: editAno || selectedDoc.ano,
+          secao: editSecao || selectedDoc.secao,
+          assinatura: editAssinatura || selectedDoc.assinatura,
+          ementa: editEmenta || selectedDoc.ementa,
+          signatario: editSignatario || selectedDoc.signatario,
+          cargoSignatario: editCargo || selectedDoc.cargoSignatario,
+        };
+
+        setSelectedDoc(updatedDoc);
+        setLocalDocs(prev => prev.map(d => d.id === selectedDoc.id ? updatedDoc : d));
+
+        addAuditLog({
+          module: groupId,
+          moduleTitle: groupName,
+          action: 'Atualização de publicação',
+          recordId: selectedDoc.id,
+          recordTitle: editNumero || selectedDoc.numero,
+          details: `Campos modificados diretamente por ${currentUser?.name} (${currentUser?.role})`,
+        });
+      }
+
+      setIsSaving(false);
+      // Requirement 7.2: No error, no "nada mudou" warning, standard success confirmation!
+      success('Alterações salvas com sucesso!');
+    }, 350);
+  };
+
+  // Replace PDF file handler (Requirement 8)
+  const handleReplacePdf = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file && selectedDoc) {
+        const updatedDoc: DocumentoOficialDTO = {
+          ...selectedDoc,
+          anexoNome: file.name,
+          anexoTamanho: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+        };
+        setSelectedDoc(updatedDoc);
+        setLocalDocs(prev => prev.map(d => d.id === selectedDoc.id ? updatedDoc : d));
+
+        addAuditLog({
+          module: groupId,
+          moduleTitle: groupName,
+          action: 'Arquivo substituído',
+          recordId: selectedDoc.id,
+          recordTitle: selectedDoc.numero,
+          details: `PDF substituído por ${currentUser?.name}: ${file.name}`,
+        });
+
+        success('Arquivo substituído com sucesso!');
+      }
+    };
+    input.click();
+  };
+
+  // Remove PDF document handler (Requirement 8)
+  const handleRemovePdf = () => {
+    if (!selectedDoc) return;
+    if (confirm(`Tem certeza que deseja remover o documento principal da publicação ${selectedDoc.numero}?`)) {
+      addAuditLog({
+        module: groupId,
+        moduleTitle: groupName,
+        action: 'Documento excluído',
+        recordId: selectedDoc.id,
+        recordTitle: selectedDoc.numero,
+        details: `Arquivo principal removido por ${currentUser?.name}`,
+      });
+      success('Documento excluído com sucesso!');
+    }
+  };
+
+  // Delete record handler
+  const handleDeleteRecord = (doc: DocumentoOficialDTO) => {
+    if (confirm(`Tem certeza que deseja excluir permanentemente o registro ${doc.numero}?`)) {
+      setLocalDocs(prev => prev.filter(d => d.id !== doc.id));
+      addAuditLog({
+        module: groupId,
+        moduleTitle: groupName,
+        action: 'Publicação excluída',
+        recordId: doc.id,
+        recordTitle: doc.numero,
+        details: `Registro removido do portal por ${currentUser?.name} (${currentUser?.role})`,
+      });
+      success('Registro excluído com sucesso!');
+    }
+  };
 
   // Helper to format heading for any municipal document type
   const getDocHeading = (doc: DocumentoOficialDTO | null) => {
@@ -453,6 +616,20 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                 <span>EXPORTAR</span>
                 <Download className="w-3.5 h-3.5 text-slate-500" />
               </button>
+
+              {/* Administrative Action: + Adicionar Registro (Requirement 6) */}
+              {canCreate && (
+                <button
+                  type="button"
+                  onClick={() => setCreateModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-sm transition cursor-pointer shadow-xs ml-2"
+                  style={{ backgroundColor: theme.primaryHex }}
+                  title="Cadastrar nova publicação no módulo"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  <span>ADICIONAR</span>
+                </button>
+              )}
             </div>
 
             {/* Helper status text */}
@@ -563,18 +740,35 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                           {doc.ementa}
                         </td>
                         <td className="py-3 px-4 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-sm border transition"
-                            style={{ 
-                              color: theme.primaryHex, 
-                              borderColor: theme.softBorderHex,
-                              backgroundColor: theme.softBgHex 
-                            }}
-                          >
-                            <Eye className="w-3 h-3" />
-                            <span>Ver</span>
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-sm border transition"
+                              style={{ 
+                                color: theme.primaryHex, 
+                                borderColor: theme.softBorderHex,
+                                backgroundColor: theme.softBgHex 
+                              }}
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>Ver</span>
+                            </button>
+
+                            {/* Administrative Row Delete (Requirement 6) */}
+                            {canDeleteRecords && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteRecord(doc);
+                                }}
+                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer"
+                                title="Excluir este registro permanentemente"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -637,14 +831,23 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
             {/* Split Screen Layout (Left: PDF Viewer | Right: Document Details) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start min-h-[580px]">
               
-              {/* LEFT COLUMN: PDF Viewer with Blur Overlay & Attachment */}
+              {/* LEFT COLUMN: PDF Viewer or MultiDocumentList depending on Module (Requirement 8 & 9) */}
               <div className="lg:col-span-6 flex flex-col justify-between space-y-4">
                 
-                <div className="space-y-3">
-                  {/* ANEXO Header Bar (Gradient gray matching Image 3) */}
-                  <div className="bg-gradient-to-b from-[#e5e7eb] to-[#d1d5db] border border-slate-300 py-1.5 px-4 text-center font-bold text-xs text-slate-700 tracking-wider">
-                    ANEXO
-                  </div>
+                {groupId === 'licitacoes' || groupId === 'contratos' ? (
+                  <MultiDocumentList
+                    publicationTitle={selectedDoc.ementa}
+                    publicationNumber={selectedDoc.numero}
+                    groupId={groupId}
+                    primaryColor={theme.primaryHex}
+                  />
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      {/* ANEXO Header Bar (Gradient gray matching Image 3) */}
+                      <div className="bg-gradient-to-b from-[#e5e7eb] to-[#d1d5db] border border-slate-300 py-1.5 px-4 text-center font-bold text-xs text-slate-700 tracking-wider">
+                        ANEXO
+                      </div>
 
                   {/* Attachment Box with Menu Dropdown (Matching Image 3 & following group theme) */}
                   <div className="relative">
@@ -679,6 +882,34 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                         <Download className={`w-4 h-4 ${isDownloading ? 'animate-bounce' : ''}`} />
                       </button>
                     </div>
+
+                    {/* Admin PDF Controls (Requirement 8) */}
+                    {(canReplaceFiles || canDeleteFiles) && (
+                      <div className="flex items-center gap-2 pt-0.5">
+                        {canReplaceFiles && (
+                          <button
+                            type="button"
+                            onClick={handleReplacePdf}
+                            className="flex-1 py-1.5 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                            title="Substituir este arquivo PDF oficial"
+                          >
+                            <Upload className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Substituir PDF</span>
+                          </button>
+                        )}
+                        {canDeleteFiles && (
+                          <button
+                            type="button"
+                            onClick={handleRemovePdf}
+                            className="py-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                            title="Remover anexo do documento"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remover</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     {/* Dropdown Menu (Visualizar / Baixar) */}
                     {attachmentMenuOpen && (
@@ -893,14 +1124,47 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                   <Download className={`w-4 h-4 ${isDownloading ? 'animate-bounce text-emerald-600' : 'text-slate-500'}`} />
                   <span>{isDownloading ? 'Baixando...' : `Baixar Arquivo Completo (${selectedDoc.anexoTamanho})`}</span>
                 </button>
+              </>
+            )}
 
-              </div>
+          </div>
 
               {/* RIGHT COLUMN: Document Metadata with Horizontal Lines (Image 3) */}
               <div className="lg:col-span-6 flex flex-col justify-between space-y-6">
                 
                 <div className="space-y-4">
                   
+                  {/* Administrative Top Bar: DIRECT EDITING ENABLED (Requirement 7: No "Editar" button required!) */}
+                  {canEdit && (
+                    <div className="bg-emerald-50 border border-emerald-200/90 rounded-xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <div>
+                          <div className="text-xs font-extrabold text-emerald-950">
+                            Modo Administrativo: Edição Direta Habilitada
+                          </div>
+                          <div className="text-[11px] text-emerald-700">
+                            Clique diretamente nos campos abaixo para alterar e clique em Salvar
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveDoc}
+                        disabled={isSaving}
+                        className="px-4 py-2 bg-[#0b5444] hover:bg-[#084336] disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5 shrink-0"
+                      >
+                        {isSaving ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Check className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isSaving ? 'Salvando...' : 'Salvar Alterações'}</span>
+                      </button>
+                    </div>
+                  )}
+
                   {/* Document Title Heading in Group Color (Image 3) */}
                   <div>
                     <h2 
@@ -918,51 +1182,114 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                   <div className="divide-y divide-slate-200 text-xs sm:text-[13px]">
                     
                     {/* Número */}
-                    <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <div className="py-2.5 flex items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-32 shrink-0">Número:</span>
-                      <span className="text-slate-700 font-mono font-medium">{selectedDoc.numero}</span>
+                      {canEdit ? (
+                        <input
+                          type="text"
+                          value={editNumero}
+                          onChange={(e) => setEditNumero(e.target.value)}
+                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded font-mono font-bold text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="text-slate-700 font-mono font-medium">{selectedDoc.numero}</span>
+                      )}
                     </div>
 
                     {/* Ano */}
-                    <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <div className="py-2.5 flex items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-32 shrink-0">Ano:</span>
-                      <span className="text-slate-700">{selectedDoc.ano}</span>
+                      {canEdit ? (
+                        <input
+                          type="number"
+                          value={editAno}
+                          onChange={(e) => setEditAno(e.target.value)}
+                          className="w-28 px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="text-slate-700">{selectedDoc.ano}</span>
+                      )}
                     </div>
 
                     {/* Seção */}
-                    <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <div className="py-2.5 flex items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-32 shrink-0">Seção:</span>
-                      <span className="text-slate-700">{selectedDoc.secao || '-'}</span>
+                      {canEdit ? (
+                        <input
+                          type="text"
+                          value={editSecao}
+                          onChange={(e) => setEditSecao(e.target.value)}
+                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="text-slate-700">{selectedDoc.secao || '-'}</span>
+                      )}
                     </div>
 
                     {/* Assinatura */}
-                    <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <div className="py-2.5 flex items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-32 shrink-0">Assinatura:</span>
-                      <span className="text-slate-700">{selectedDoc.assinatura}</span>
+                      {canEdit ? (
+                        <input
+                          type="date"
+                          value={editAssinatura}
+                          onChange={(e) => setEditAssinatura(e.target.value)}
+                          className="w-36 px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="text-slate-700">{selectedDoc.assinatura}</span>
+                      )}
                     </div>
 
                     {/* Ementa */}
                     <div className="py-2.5 flex items-start justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Ementa:</span>
-                      <span className="text-slate-700 uppercase leading-relaxed text-justify flex-1">
-                        {selectedDoc.ementa}
-                      </span>
+                      <span className="font-bold text-slate-800 w-32 shrink-0 pt-1">Ementa:</span>
+                      {canEdit ? (
+                        <textarea
+                          rows={3}
+                          value={editEmenta}
+                          onChange={(e) => setEditEmenta(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none uppercase leading-relaxed font-sans"
+                        />
+                      ) : (
+                        <span className="text-slate-700 uppercase leading-relaxed text-justify flex-1">
+                          {selectedDoc.ementa}
+                        </span>
+                      )}
                     </div>
 
                     {/* Signatário */}
-                    <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <div className="py-2.5 flex items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-32 shrink-0">Signatário:</span>
-                      <span className="text-slate-700 font-medium">{selectedDoc.signatario}</span>
+                      {canEdit ? (
+                        <input
+                          type="text"
+                          value={editSignatario}
+                          onChange={(e) => setEditSignatario(e.target.value)}
+                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="text-slate-700 font-medium">{selectedDoc.signatario}</span>
+                      )}
                     </div>
 
                     {/* Cargo do Signatário */}
-                    <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <div className="py-2.5 flex items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-32 shrink-0">Cargo:</span>
-                      <span className="text-slate-600">{selectedDoc.cargoSignatario}</span>
+                      {canEdit ? (
+                        <input
+                          type="text"
+                          value={editCargo}
+                          onChange={(e) => setEditCargo(e.target.value)}
+                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="text-slate-600">{selectedDoc.cargoSignatario}</span>
+                      )}
                     </div>
 
                     {/* Órgão Emissor */}
-                    <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <div className="py-2.5 flex items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-32 shrink-0">Órgão Emissor:</span>
                       <span className="text-slate-600">Prefeitura Municipal de São Miguel do Tocantins</span>
                     </div>
@@ -971,8 +1298,8 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 
                 </div>
 
-                {/* Right Column Bottom: VOLTAR Button (Matching Image 3) */}
-                <div className="pt-4 border-t border-slate-200">
+                {/* Right Column Bottom: VOLTAR & SALVAR Buttons (Matching Image 3 & Requirement 7) */}
+                <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -984,6 +1311,18 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                     <ArrowLeft className="w-4 h-4" />
                     <span>VOLTAR PARA A LISTA</span>
                   </button>
+
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={handleSaveDoc}
+                      disabled={isSaving}
+                      className="w-full sm:w-auto px-6 py-2.5 bg-[#0b5444] hover:bg-[#084336] disabled:opacity-60 text-white font-bold text-xs rounded-sm transition cursor-pointer flex items-center justify-center gap-2 shadow-xs"
+                    >
+                      {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      <span>{isSaving ? 'Salvando alterações...' : 'SALVAR ALTERAÇÕES'}</span>
+                    </button>
+                  )}
                 </div>
 
               </div>
@@ -994,6 +1333,17 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
         )}
 
       </div>
+
+      {/* Create Publication Modal (Requirement 11) */}
+      <CreatePublicationModal
+        isOpen={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        defaultModule={groupId}
+        defaultTab={activeTab}
+        onSuccessCreated={(newDoc) => {
+          setLocalDocs(prev => [newDoc, ...prev]);
+        }}
+      />
 
     </div>
   );
