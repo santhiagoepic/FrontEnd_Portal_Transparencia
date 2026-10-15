@@ -53,4 +53,16 @@ export const apiClient = {
       );
     }
   },
+
+  async get<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.request<T>(endpoint, { ...options, method: 'GET' });
+  },
+
+  async post<T>(endpoint: string, data?: any, options: RequestInit = {}): Promise<T> {
+    return this.request<T>(endpoint, {
+      ...options,
+      method: 'POST',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  },
 };

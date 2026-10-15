@@ -92,7 +92,7 @@ export interface DocumentoOficialDTO {
   ementa: string;
   anexoNome: string;
   anexoTamanho: string;
-  signatario: string;
-  cargoSignatario: string;
+  signatario?: string;
+  cargoSignatario?: string;
   textoIntegral?: string;
 }

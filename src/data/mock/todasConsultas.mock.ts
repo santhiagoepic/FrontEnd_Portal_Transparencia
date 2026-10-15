@@ -32,8 +32,7 @@ export const getMockDocumentsByGroupAndTab = (
       (d) =>
         d.numero.toLowerCase().includes(s) ||
         d.ementa.toLowerCase().includes(s) ||
-        d.secao.toLowerCase().includes(s) ||
-        d.signatario.toLowerCase().includes(s)
+        (d.signatario && d.signatario.toLowerCase().includes(s))
     );
   }
 

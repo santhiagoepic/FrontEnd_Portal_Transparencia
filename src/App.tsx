@@ -11,6 +11,9 @@ import { PrimaryCards } from './components/PrimaryCards.tsx';
 import { ConsultasGrid } from './components/ConsultasGrid.tsx';
 import { QuickAccessDrawer } from './components/QuickAccessDrawer.tsx';
 import { GroupDetailView } from './components/GroupDetailView.tsx';
+import { OuvidoriaModule } from './components/ouvidoria/OuvidoriaModule.tsx';
+import { EsicModule } from './components/esic/EsicModule.tsx';
+import { ToastProvider } from './components/Toast.tsx';
 import { DetailModal } from './components/DetailModal.tsx';
 import { LoginModal } from './components/LoginModal.tsx';
 import { AccessibilityModal } from './components/AccessibilityModal.tsx';
@@ -70,13 +73,13 @@ export default function App() {
       setCurrentView('home');
       setModalOpen(false);
     } else if (tab === 'acesso-informacao') {
-      handleSelectGroup('institucional', 'Carta de Serviços ao Cidadão');
+      handleSelectGroup('sic', 'SIC - Serviço de Informação ao Cidadão');
     } else if (tab === 'legislacao') {
       handleSelectGroup('atos-normativos', 'Leis Municipais');
     } else if (tab === 'perguntas-frequentes') {
       handleSelectGroup('institucional', 'Perguntas Frequentes');
     } else if (tab === 'fale-conosco') {
-      handleSelectGroup('ouvidoria', 'Solicitação / Reclamação');
+      handleSelectGroup('ouvidoria', 'Solicitação');
     }
   };
 
@@ -107,7 +110,9 @@ export default function App() {
       handleSelectGroup('obras');
     } else if (q.includes('lei') || q.includes('decreto') || q.includes('portaria')) {
       handleSelectGroup('atos-normativos');
-    } else if (q.includes('sic') || q.includes('ouvidor') || q.includes('denuncia') || q.includes('reclam')) {
+    } else if (q.includes('esic') || q.includes('sic') || q.includes('acesso à informação') || q.includes('lai')) {
+      handleSelectGroup('sic');
+    } else if (q.includes('ouvidor') || q.includes('denuncia') || q.includes('reclam') || q.includes('elogio') || q.includes('sugest')) {
       handleSelectGroup('ouvidoria');
     } else {
       handleSelectGroup('institucional');
@@ -129,111 +134,127 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-white text-slate-800 flex flex-col font-sans selection:bg-emerald-100 selection:text-emerald-900">
-      
-      {/* 1. Official Header matching exact screenshot */}
-      <Header
-        activeTab={activeTab}
-        onSelectTab={handleSelectTab}
-        onOpenLogin={() => setLoginOpen(true)}
-        onOpenAccessibility={() => setAccessibilityOpen(true)}
-        onToggleHighContrast={() => setIsHighContrast(!isHighContrast)}
-        isHighContrast={isHighContrast}
-        fontSize={fontSize}
-        onChangeFontSize={handleChangeFontSize}
-      />
+    <ToastProvider>
+      <div className="min-h-screen bg-white text-slate-800 flex flex-col font-sans selection:bg-emerald-100 selection:text-emerald-900">
+        
+        {/* 1. Official Header matching exact screenshot */}
+        <Header
+          activeTab={activeTab}
+          onSelectTab={handleSelectTab}
+          onOpenLogin={() => setLoginOpen(true)}
+          onOpenAccessibility={() => setAccessibilityOpen(true)}
+          onToggleHighContrast={() => setIsHighContrast(!isHighContrast)}
+          isHighContrast={isHighContrast}
+          fontSize={fontSize}
+          onChangeFontSize={handleChangeFontSize}
+        />
 
-      {/* Main Container */}
-      <main className="flex-1 w-full mx-auto">
-        {currentView === 'home' ? (
-          <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 xl:pr-12">
-            {/* 2. Hero Section: Welcome & Search Box */}
-            <HeroSection
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onSearchSubmit={handleSearchSubmit}
-              onTagClick={handleTagClick}
-            />
+        {/* Main Container */}
+        <main className="flex-1 w-full mx-auto">
+          {currentView === 'home' ? (
+            <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 xl:pr-12">
+              {/* 2. Hero Section: Welcome & Search Box */}
+              <HeroSection
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onSearchSubmit={handleSearchSubmit}
+                onTagClick={handleTagClick}
+              />
 
-            {/* 3. Top 4 Highlight Cards: Receitas, Despesas, Licitações, SIC/Ouvidoria */}
-            <PrimaryCards onCardClick={(cardType) => handleSelectGroup(cardType)} />
+              {/* 3. Top 4 Highlight Cards: Receitas, Despesas, Licitações, SIC/Ouvidoria */}
+              <PrimaryCards onCardClick={(cardType) => handleSelectGroup(cardType)} />
 
-            {/* 4. Section: Principais Áreas de Consulta (All 21 Groups in 4 Columns with Colors & Icons) */}
-            <section className="mt-8 mb-16">
-              {/* Section Title & Subtitle */}
-              <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-100 pb-4">
-                <div>
-                  <h2 className="text-2xl sm:text-[26px] font-extrabold text-[#0c2340] tracking-tight">
-                    Principais Áreas de Consulta
-                  </h2>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Acesse informações detalhadas sobre a gestão pública municipal.
-                  </p>
-                </div>
-                
-                {/* Quick Access trigger button right above grid as well with lightning icon */}
-                <button
-                  onClick={() => setQuickDrawerOpen(true)}
-                  className="inline-flex items-center gap-2 text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-4 py-2 rounded-xl transition cursor-pointer self-start sm:self-auto shadow-2xs"
-                >
-                  <div className="w-5 h-5 rounded-full bg-amber-400 text-slate-900 flex items-center justify-center shrink-0 shadow-2xs">
-                    <Zap className="w-3 h-3 fill-slate-950 text-slate-950" />
+              {/* 4. Section: Principais Áreas de Consulta (All 21 Groups in 4 Columns with Colors & Icons) */}
+              <section className="mt-8 mb-16">
+                {/* Section Title & Subtitle */}
+                <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div>
+                    <h2 className="text-2xl sm:text-[26px] font-extrabold text-[#0c2340] tracking-tight">
+                      Principais Áreas de Consulta
+                    </h2>
+                    <p className="text-sm text-slate-500 mt-1">
+                      Acesse informações detalhadas sobre a gestão pública municipal.
+                    </p>
                   </div>
-                  <span>Abrir Acesso Rápido & Dúvidas →</span>
-                </button>
-              </div>
+                  
+                  {/* Quick Access trigger button right above grid as well with lightning icon */}
+                  <button
+                    onClick={() => setQuickDrawerOpen(true)}
+                    className="inline-flex items-center gap-2 text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-4 py-2 rounded-xl transition cursor-pointer self-start sm:self-auto shadow-2xs"
+                  >
+                    <div className="w-5 h-5 rounded-full bg-amber-400 text-slate-900 flex items-center justify-center shrink-0 shadow-2xs">
+                      <Zap className="w-3 h-3 fill-slate-950 text-slate-950" />
+                    </div>
+                    <span>Abrir Acesso Rápido & Dúvidas →</span>
+                  </button>
+                </div>
 
-              {/* Full 4-Column Layout with all 21 groups */}
-              <ConsultasGrid onSelectItem={handleSelectGroup} />
-            </section>
-          </div>
-        ) : (
-          /* Dedicated Group Screen with Breadcrumbs and Browser-Style Tabs */
-          <GroupDetailView
-            groupId={selectedGroupId}
-            initialSubItem={selectedGroupSubItem}
-            onBackToHome={() => setCurrentView('home')}
-            onSelectAnotherGroup={(groupId, subItem) => handleSelectGroup(groupId, subItem)}
-          />
-        )}
-      </main>
+                {/* Full 4-Column Layout with all 21 groups */}
+                <ConsultasGrid onSelectItem={handleSelectGroup} />
+              </section>
+            </div>
+          ) : selectedGroupId === 'ouvidoria' ? (
+            /* Dedicated Ouvidoria Module */
+            <OuvidoriaModule
+              initialSubItem={selectedGroupSubItem}
+              onBackToHome={() => setCurrentView('home')}
+              onSelectGroup={handleSelectGroup}
+            />
+          ) : selectedGroupId === 'sic' || selectedGroupId === 'esic' ? (
+            /* Dedicated e-SIC Module */
+            <EsicModule
+              initialSubItem={selectedGroupSubItem}
+              onBackToHome={() => setCurrentView('home')}
+              onSelectGroup={handleSelectGroup}
+            />
+          ) : (
+            /* Dedicated Group Screen with Breadcrumbs and Browser-Style Tabs */
+            <GroupDetailView
+              groupId={selectedGroupId}
+              initialSubItem={selectedGroupSubItem}
+              onBackToHome={() => setCurrentView('home')}
+              onSelectAnotherGroup={(groupId, subItem) => handleSelectGroup(groupId, subItem)}
+            />
+          )}
+        </main>
 
-      {/* 5. Footer with official government transparency seals and city contacts */}
-      <Footer onOpenModal={handleOpenModal} />
+        {/* 5. Footer with official government transparency seals and city contacts */}
+        <Footer onOpenModal={handleOpenModal} />
 
-      {/* Floating Quick Access Drawer & Side Tab */}
-      <QuickAccessDrawer
-        isOpen={quickDrawerOpen}
-        onClose={() => setQuickDrawerOpen(false)}
-        onOpen={() => setQuickDrawerOpen(true)}
-        onSelectItem={handleQuickAccess}
-        onOpenHelp={() => handleOpenModal('perguntas-frequentes')}
-      />
+        {/* Floating Quick Access Drawer & Side Tab */}
+        <QuickAccessDrawer
+          isOpen={quickDrawerOpen}
+          onClose={() => setQuickDrawerOpen(false)}
+          onOpen={() => setQuickDrawerOpen(true)}
+          onSelectItem={handleQuickAccess}
+          onOpenHelp={() => handleOpenModal('perguntas-frequentes')}
+        />
 
-      {/* Interactive Detail Modal */}
-      <DetailModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        category={modalCategory}
-        subCategory={modalSubCategory}
-      />
+        {/* Interactive Detail Modal */}
+        <DetailModal
+          isOpen={modalOpen}
+          onClose={() => setModalOpen(false)}
+          category={modalCategory}
+          subCategory={modalSubCategory}
+        />
 
-      {/* Login Modal */}
-      <LoginModal
-        isOpen={loginOpen}
-        onClose={() => setLoginOpen(false)}
-      />
+        {/* Login Modal */}
+        <LoginModal
+          isOpen={loginOpen}
+          onClose={() => setLoginOpen(false)}
+        />
 
-      {/* Accessibility Modal */}
-      <AccessibilityModal
-        isOpen={accessibilityOpen}
-        onClose={() => setAccessibilityOpen(false)}
-        isHighContrast={isHighContrast}
-        onToggleHighContrast={() => setIsHighContrast(!isHighContrast)}
-        fontSize={fontSize}
-        onChangeFontSize={handleChangeFontSize}
-      />
+        {/* Accessibility Modal */}
+        <AccessibilityModal
+          isOpen={accessibilityOpen}
+          onClose={() => setAccessibilityOpen(false)}
+          isHighContrast={isHighContrast}
+          onToggleHighContrast={() => setIsHighContrast(!isHighContrast)}
+          fontSize={fontSize}
+          onChangeFontSize={handleChangeFontSize}
+        />
 
-    </div>
+      </div>
+    </ToastProvider>
   );
 }
