@@ -28,7 +28,7 @@ export const GROUP_CONFIGS: Record<string, GroupThemeConfig> = {
     softBorderHex: '#bfdbfe',
     textColor: 'text-blue-700',
     badgeBg: 'bg-blue-100',
-    tabs: ['ESTRUTURA ORGANIZACIONAL', 'COMPETÊNCIAS', 'HORÁRIO DE ATENDIMENTO', 'PERGUNTAS FREQUENTES'],
+    tabs: ['ESTRUTURA ORGANIZACIONAL', 'PERGUNTAS FREQUENTES'],
   },
   'contratos': {
     groupId: 'contratos',

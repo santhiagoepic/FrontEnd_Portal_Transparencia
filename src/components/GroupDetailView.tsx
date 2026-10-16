@@ -41,6 +41,7 @@ import {
   formatCombinedLicitacaoNumber,
 } from '../services/licitacoesConfig.service';
 import { AppStatusBadge } from './ui/AppStatusBadge';
+import { InstitucionalModule } from './institucional/InstitucionalModule';
 
 interface GroupDetailViewProps {
   groupId: string;

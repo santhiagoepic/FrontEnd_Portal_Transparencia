@@ -13,6 +13,7 @@ import { QuickAccessDrawer } from './components/QuickAccessDrawer.tsx';
 import { GroupDetailView } from './components/GroupDetailView.tsx';
 import { OuvidoriaModule } from './components/ouvidoria/OuvidoriaModule.tsx';
 import { EsicModule } from './components/esic/EsicModule.tsx';
+import { InstitucionalModule } from './components/institucional/InstitucionalModule';
 import { ToastProvider } from './components/Toast.tsx';
 import { DetailModal } from './components/DetailModal.tsx';
 import { LoginModal } from './components/LoginModal.tsx';
@@ -224,6 +225,13 @@ export default function App() {
             /* Dedicated Ouvidoria Module */
             <OuvidoriaModule
               initialSubItem={selectedGroupSubItem}
+              onBackToHome={() => setCurrentView('home')}
+              onSelectGroup={handleSelectGroup}
+            />
+          ) : selectedGroupId === 'institucional' ? (
+            /* Dedicated Informações Institucionais Module */
+            <InstitucionalModule
+              initialTab={selectedGroupSubItem}
               onBackToHome={() => setCurrentView('home')}
               onSelectGroup={handleSelectGroup}
             />
