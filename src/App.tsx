@@ -20,9 +20,11 @@ import { AccessibilityModal } from './components/AccessibilityModal.tsx';
 import { Footer } from './components/Footer.tsx';
 import { AuthProvider } from './context/AuthContext';
 import { DashboardView } from './components/admin/DashboardView';
+import { UserManagementModal } from './components/admin/UserManagementModal';
+import { ConfiguracoesView } from './components/admin/ConfiguracoesView';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'group' | 'dashboard'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'group' | 'dashboard' | 'configuracoes'>('home');
   const [selectedGroupId, setSelectedGroupId] = useState('institucional');
   const [selectedGroupSubItem, setSelectedGroupSubItem] = useState<string | undefined>(undefined);
 
@@ -36,6 +38,7 @@ export default function App() {
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false);
   
   const [loginOpen, setLoginOpen] = useState(false);
+  const [userManagementOpen, setUserManagementOpen] = useState(false);
   const [accessibilityOpen, setAccessibilityOpen] = useState(false);
   const [isHighContrast, setIsHighContrast] = useState(false);
   const [fontSize, setFontSize] = useState(0); // -1, 0, 1, 2
@@ -85,11 +88,14 @@ export default function App() {
     }
   };
 
-  const handleSelectGroup = (groupId: string, subItem?: string) => {
+  const [selectedDocId, setSelectedDocId] = useState<string | undefined>(undefined);
+
+  const handleSelectGroup = (groupId: string, subItem?: string, docId?: string) => {
     let cleanId = groupId;
     if (groupId === 'sic-ouvidoria') cleanId = 'ouvidoria';
     setSelectedGroupId(cleanId);
     setSelectedGroupSubItem(subItem);
+    setSelectedDocId(docId);
     setCurrentView('group');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -150,11 +156,21 @@ export default function App() {
           fontSize={fontSize}
           onChangeFontSize={handleChangeFontSize}
           onNavigateToDashboard={() => setCurrentView('dashboard')}
+          onOpenUserManagement={() => setUserManagementOpen(true)}
+          onNavigateToConfiguracoes={() => setCurrentView('configuracoes')}
         />
 
         {/* Main Container */}
         <main className="flex-1 w-full mx-auto">
-          {currentView === 'dashboard' ? (
+          {currentView === 'configuracoes' ? (
+            /* Dedicated Configurações Gerais View */
+            <ConfiguracoesView
+              onBack={() => setCurrentView('dashboard')}
+              onNavigateToGroup={(groupId, subItem, docId) => {
+                handleSelectGroup(groupId, subItem, docId);
+              }}
+            />
+          ) : currentView === 'dashboard' ? (
             /* Dedicated Administrative Dashboard (Requirement 4) */
             <DashboardView
               onNavigateToGroup={(groupId, subItem) => {
@@ -223,8 +239,9 @@ export default function App() {
             <GroupDetailView
               groupId={selectedGroupId}
               initialSubItem={selectedGroupSubItem}
+              initialDocId={selectedDocId}
               onBackToHome={() => setCurrentView('home')}
-              onSelectAnotherGroup={(groupId, subItem) => handleSelectGroup(groupId, subItem)}
+              onSelectAnotherGroup={(groupId, subItem, docId) => handleSelectGroup(groupId, subItem, docId)}
             />
           )}
         </main>
@@ -264,6 +281,12 @@ export default function App() {
           onToggleHighContrast={() => setIsHighContrast(!isHighContrast)}
           fontSize={fontSize}
           onChangeFontSize={handleChangeFontSize}
+        />
+
+        {/* User Management Modal */}
+        <UserManagementModal
+          isOpen={userManagementOpen}
+          onClose={() => setUserManagementOpen(false)}
         />
 
       </div>

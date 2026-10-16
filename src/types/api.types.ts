@@ -96,5 +96,6 @@ export interface DocumentoOficialDTO {
   cargoSignatario?: string;
   textoIntegral?: string;
   categoria?: string;
+  orgaoEmissor?: string;
 }
 

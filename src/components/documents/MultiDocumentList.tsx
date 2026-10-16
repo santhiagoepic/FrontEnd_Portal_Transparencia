@@ -18,6 +18,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Toast';
 import { Brasao } from '../Brasao';
+import { AppSelect } from '../ui/AppSelect';
 
 export interface DocumentoEtapa {
   id: string;
@@ -512,21 +513,17 @@ export const MultiDocumentList: React.FC<MultiDocumentListProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Etapa do Procedimento
-                </label>
-                <select
-                  value={targetFase}
-                  onChange={(e) => setTargetFase(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                >
-                  <option value="preparatoria">Fase Preparatória</option>
-                  <option value="divulgacao">Fase de Divulgação</option>
-                  <option value="julgamento">Fase de Julgamento</option>
-                  <option value="homologacao">Fase de Homologação</option>
-                </select>
-              </div>
+              <AppSelect
+                label="Etapa do Procedimento"
+                value={targetFase}
+                onChange={(val) => setTargetFase(val as any)}
+                options={[
+                  { value: 'preparatoria', label: 'Fase Preparatória' },
+                  { value: 'divulgacao', label: 'Fase de Divulgação' },
+                  { value: 'julgamento', label: 'Fase de Julgamento' },
+                  { value: 'homologacao', label: 'Fase de Homologação' },
+                ]}
+              />
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">

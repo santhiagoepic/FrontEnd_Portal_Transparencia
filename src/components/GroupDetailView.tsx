@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useTransition } from 'react';
+import React, { useState, useEffect, useTransition, useRef } from 'react';
 import { 
   ChevronRight, 
   ArrowLeft, 
@@ -8,13 +8,7 @@ import {
   Calendar, 
   ChevronDown, 
   ArrowRight,
-  Menu,
   Eye,
-  ZoomIn,
-  ZoomOut,
-  RotateCw,
-  Printer,
-  FileCheck,
   Shield,
   FileText,
   Copy,
@@ -26,8 +20,7 @@ import {
   ExternalLink,
   PlusCircle,
   Trash2,
-  Upload,
-  FolderOpen
+  Settings
 } from 'lucide-react';
 import { Brasao } from './Brasao.tsx';
 import { GROUP_CONFIGS } from '../config/navigation.config';
@@ -37,19 +30,30 @@ import { useToast } from './Toast';
 import { TableSkeleton } from './Skeleton';
 import { siteConfig } from '../config/site.config';
 import { useAuth } from '../context/AuthContext';
-import { CreatePublicationModal } from './admin/CreatePublicationModal';
-import { MultiDocumentList } from './documents/MultiDocumentList';
+import { PermanentDocumentManager, ManagedFile } from './documents/PermanentDocumentManager';
+import { AdminPublicationWorkspace } from './admin/AdminPublicationWorkspace';
+import { LicitacoesConfigModal } from './admin/LicitacoesConfigModal';
+import { LicitacoesAlertsPopover } from './admin/LicitacoesAlertsPopover';
+import { licitacoesAlertsService } from '../services/licitacoesAlerts.service';
+import {
+  licitacoesConfigService,
+  extractSimpleNumber,
+  formatCombinedLicitacaoNumber,
+} from '../services/licitacoesConfig.service';
+import { AppStatusBadge } from './ui/AppStatusBadge';
 
 interface GroupDetailViewProps {
   groupId: string;
   initialSubItem?: string;
+  initialDocId?: string;
   onBackToHome: () => void;
-  onSelectAnotherGroup: (groupId: string, subItem?: string) => void;
+  onSelectAnotherGroup: (groupId: string, subItem?: string, docId?: string) => void;
 }
 
 export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
   groupId,
   initialSubItem,
+  initialDocId,
   onBackToHome,
   onSelectAnotherGroup,
 }) => {
@@ -86,14 +90,6 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 
   const [activeTab, setActiveTab] = useState<string>(getInitialTab());
 
-  // Reset tab and selected document whenever group changes
-  useEffect(() => {
-    setActiveTab(getInitialTab());
-    setSelectedDoc(null);
-    setIsPdfBlurred(true);
-    setSearchQuery('');
-  }, [groupId, initialSubItem]);
-
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAno, setSelectedAno] = useState<string>('Todos');
@@ -114,39 +110,156 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
     setLocalDocs(documents);
   }, [documents]);
 
-  // View mode: 'list' (Image 2) or 'detail' (Image 3)
+  // View mode: 'list' or 'detail' (Publication page)
   const [selectedDoc, setSelectedDoc] = useState<DocumentoOficialDTO | null>(null);
+  const [isNewRecord, setIsNewRecord] = useState<boolean>(false);
+  const [managedFiles, setManagedFiles] = useState<ManagedFile[]>([]);
 
-  // Inline editing state for selectedDoc (Requirement 7: No "Editar" button! Fields are immediately editable for authorized admins)
+  // Form Fields State
   const [editNumero, setEditNumero] = useState('');
-  const [editAno, setEditAno] = useState('');
-  const [editSecao, setEditSecao] = useState('');
+  const [editAno, setEditAno] = useState('2026');
+  const [editSecao, setEditSecao] = useState('Gabinete do Prefeito');
   const [editAssinatura, setEditAssinatura] = useState('');
   const [editEmenta, setEditEmenta] = useState('');
-  const [editSignatario, setEditSignatario] = useState('');
-  const [editCargo, setEditCargo] = useState('');
+  const [editSignatario, setEditSignatario] = useState('Prefeito Municipal de São Miguel do Tocantins');
+  const [editCargo, setEditCargo] = useState('Prefeito Municipal');
+  const [editCovid, setEditCovid] = useState<boolean>(false);
+  const [editTipoRelacao, setEditTipoRelacao] = useState<string>('Nenhuma');
+  const [editAtosLeis, setEditAtosLeis] = useState<string>('Nenhum');
   const [isSaving, setIsSaving] = useState(false);
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
 
-  // Synchronize editing fields and unblur PDF directly if authorized admin
+  const currentDocsList = localDocs.length > 0 ? localDocs : documents;
+  const licitacoesAlerts = React.useMemo(
+    () => licitacoesAlertsService.computeAlertsForDocuments(currentDocsList),
+    [currentDocsList]
+  );
+
+  const handleSelectDocById = (id: string) => {
+    const found = currentDocsList.find((d) => d.id === id);
+    if (found) {
+      setSelectedDoc(found);
+      setIsNewRecord(false);
+      setIsPdfBlurred(true);
+    }
+  };
+
+  const getSituacaoName = (doc: DocumentoOficialDTO): string => {
+    const detailed = licitacoesConfigService.getLicitacaoDetalhada(doc.id);
+    if (detailed) {
+      const sit = licitacoesConfigService.getSituacoes().find((s) => s.id === detailed.situacaoId);
+      if (sit) return sit.nome;
+    }
+    if (doc.numero.includes('014')) return 'Aberta';
+    if (doc.numero.includes('028')) return 'Homologada';
+    if (doc.numero.includes('SANC') || doc.numero.includes('022')) return 'Encerrada';
+    return 'Em Andamento';
+  };
+
+
+  const getSingularTitle = () => {
+    const tab = activeTab.toLowerCase();
+    if (tab.includes('portaria')) return 'Portaria';
+    if (tab.includes('decreto')) return 'Decreto';
+    if (tab.includes('lei')) return 'Lei';
+    if (tab.includes('resolu')) return 'Resolução';
+    if (tab.includes('edital') || tab.includes('licita')) return 'Licitação';
+    if (tab.includes('contrato')) return 'Contrato';
+    return activeTab;
+  };
+
+  const handleStartNewPublication = () => {
+    const today = new Date().toLocaleDateString('pt-BR');
+    const newDocTemplate: DocumentoOficialDTO = {
+      id: `new-${Date.now()}`,
+      groupId,
+      tab: activeTab,
+      numero: '',
+      numeroSimples: '',
+      ano: '2026',
+      secao: 'Gabinete do Prefeito',
+      assinatura: today,
+      ementa: '',
+      signatario: 'Prefeito Municipal de São Miguel do Tocantins',
+      cargoSignatario: 'Prefeito Municipal',
+      anexoNome: '',
+      anexoTamanho: '',
+      orgaoEmissor: 'Gabinete do Prefeito',
+      categoria: activeTab,
+      textoIntegral: '',
+    };
+
+    setSelectedDoc(newDocTemplate);
+    setIsNewRecord(true);
+    setManagedFiles([]);
+    setEditNumero('');
+    setEditAno('2026');
+    setEditSecao('Gabinete do Prefeito');
+    setEditAssinatura(today);
+    setEditEmenta('');
+    setEditSignatario('Prefeito Municipal de São Miguel do Tocantins');
+    setEditCargo('Prefeito Municipal');
+    setEditCovid(false);
+    setEditTipoRelacao('Nenhuma');
+    setEditAtosLeis('Nenhum');
+  };
+
+  // Reset tab and selected document whenever group changes, or handle initialDocId
   useEffect(() => {
-    if (selectedDoc) {
+    setActiveTab(getInitialTab());
+    setSearchQuery('');
+
+    if (initialDocId === 'new') {
+      handleStartNewPublication();
+    } else if (initialDocId) {
+      const match = localDocs.find(d => d.id === initialDocId);
+      if (match) {
+        setSelectedDoc(match);
+        setIsNewRecord(false);
+      }
+    } else {
+      setSelectedDoc(null);
+      setIsNewRecord(false);
+      setIsPdfBlurred(true);
+    }
+  }, [groupId, initialSubItem, initialDocId]);
+
+  // Synchronize editing fields and populate managedFiles when opening a document
+  useEffect(() => {
+    if (selectedDoc && !isNewRecord) {
       setEditNumero(selectedDoc.numero);
-      setEditAno(selectedDoc.ano);
-      setEditSecao(selectedDoc.secao || '');
+      setEditAno(selectedDoc.ano || '2026');
+      setEditSecao(selectedDoc.secao || 'Gabinete do Prefeito');
       setEditAssinatura(selectedDoc.assinatura);
       setEditEmenta(selectedDoc.ementa);
-      setEditSignatario(selectedDoc.signatario || '');
-      setEditCargo(selectedDoc.cargoSignatario || '');
+      setEditSignatario(selectedDoc.signatario || 'Prefeito Municipal de São Miguel do Tocantins');
+      setEditCargo(selectedDoc.cargoSignatario || 'Prefeito Municipal');
 
-      // Requirement 8: For authorized admin, PDF is immediately available without blur!
+      // Populate managed files for document manager with published friendly name
+      if (selectedDoc.anexoNome) {
+        setManagedFiles([
+          {
+            id: `file-${selectedDoc.id}`,
+            name: 'Documento Principal',
+            formattedSize: selectedDoc.anexoTamanho || '720 KB',
+            status: 'ready',
+            progress: 100,
+            uploadedAt: selectedDoc.assinatura,
+            isMain: true,
+            documentTypeId: 'edital',
+          },
+        ]);
+      } else {
+        setManagedFiles([]);
+      }
+
       if (canEdit || canViewAdmin) {
         setIsPdfBlurred(false);
       } else {
         setIsPdfBlurred(true);
       }
     }
-  }, [selectedDoc, canEdit, canViewAdmin]);
+  }, [selectedDoc, isNewRecord, canEdit, canViewAdmin]);
 
   // PDF Viewer State (Blur toggle, zoom, rotation)
   const [isPdfBlurred, setIsPdfBlurred] = useState<boolean>(true);
@@ -173,31 +286,85 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
     return true;
   });
 
-  // Save changes handler (Idempotent: Requirement 7.2 & 7.3)
+  // Save changes handler (Idempotent for both new and existing records)
   const handleSaveDoc = () => {
     if (!selectedDoc) return;
+
+    if (isNewRecord && !editNumero.trim() && !editEmenta.trim()) {
+      toastError('Preencha ao menos o número ou a ementa da publicação antes de salvar.');
+      return;
+    }
+
     setIsSaving(true);
 
     setTimeout(() => {
-      const hasChanged = 
-        editNumero !== selectedDoc.numero ||
-        editAno !== selectedDoc.ano ||
-        editSecao !== (selectedDoc.secao || '') ||
-        editAssinatura !== selectedDoc.assinatura ||
-        editEmenta !== selectedDoc.ementa ||
-        editSignatario !== (selectedDoc.signatario || '') ||
-        editCargo !== (selectedDoc.cargoSignatario || '');
+      const mainFile = managedFiles.find(f => f.status === 'ready') || managedFiles[0];
+      const fileName = mainFile
+        ? (mainFile.documentTypeId === 'edital' || mainFile.isMain || managedFiles.length === 1 ? 'Documento Principal' : mainFile.name)
+        : 'Documento Principal';
+      const fileSize = mainFile?.formattedSize || selectedDoc.anexoTamanho || '720 KB';
 
-      if (hasChanged) {
+      let saveNumero = editNumero;
+      let saveAno = editAno || '2026';
+      let saveCategoria = activeTab;
+
+      if (groupId === 'licitacoes' || selectedDoc?.groupId === 'licitacoes') {
+        const detailed = licitacoesConfigService.getLicitacaoDetalhada(selectedDoc?.id || '');
+        if (detailed) {
+          const modalidades = licitacoesConfigService.getModalidades();
+          const modalidadeNome =
+            modalidades.find((m) => m.id === detailed.modalidadeId)?.nome || 'Pregão Eletrônico';
+          const cleanNum = extractSimpleNumber(detailed.numero || editNumero);
+          saveAno = detailed.ano || editAno || '2026';
+          saveNumero = cleanNum ? `${cleanNum}/${saveAno}` : editNumero;
+          saveCategoria = modalidadeNome;
+        }
+      }
+
+      if (isNewRecord) {
+        const createdDoc: DocumentoOficialDTO = {
+          ...selectedDoc,
+          id: `doc-${Date.now()}`,
+          numero: saveNumero || `Nº 0${Math.floor(Math.random() * 90 + 10)}/2026`,
+          ano: saveAno,
+          secao: editSecao || 'Gabinete do Prefeito',
+          assinatura: editAssinatura || new Date().toLocaleDateString('pt-BR'),
+          ementa: editEmenta || `PUBLICAÇÃO OFICIAL DE ${activeTab.toUpperCase()}`,
+          signatario: editSignatario || 'Prefeito Municipal de São Miguel do Tocantins',
+          cargoSignatario: editCargo || 'Prefeito Municipal',
+          anexoNome: fileName,
+          anexoTamanho: fileSize,
+          categoria: saveCategoria,
+        };
+
+        setLocalDocs(prev => [createdDoc, ...prev]);
+        setSelectedDoc(createdDoc);
+        setIsNewRecord(false);
+
+        addAuditLog({
+          module: groupId,
+          moduleTitle: groupName,
+          action: 'Cadastro de publicação',
+          recordId: createdDoc.id,
+          recordTitle: createdDoc.numero,
+          details: `Nova publicação cadastrada via página individual por ${currentUser?.name || 'Administrador'} com ${managedFiles.length} documento(s) anexado(s)`,
+        });
+
+        setIsSaving(false);
+        success('Publicação cadastrada com sucesso!');
+      } else {
         const updatedDoc: DocumentoOficialDTO = {
           ...selectedDoc,
-          numero: editNumero || selectedDoc.numero,
-          ano: editAno || selectedDoc.ano,
+          numero: saveNumero || selectedDoc.numero,
+          ano: saveAno || selectedDoc.ano,
+          categoria: saveCategoria || selectedDoc.categoria,
           secao: editSecao || selectedDoc.secao,
           assinatura: editAssinatura || selectedDoc.assinatura,
           ementa: editEmenta || selectedDoc.ementa,
           signatario: editSignatario || selectedDoc.signatario,
           cargoSignatario: editCargo || selectedDoc.cargoSignatario,
+          anexoNome: fileName,
+          anexoTamanho: fileSize,
         };
 
         setSelectedDoc(updatedDoc);
@@ -208,15 +375,21 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
           moduleTitle: groupName,
           action: 'Atualização de publicação',
           recordId: selectedDoc.id,
-          recordTitle: editNumero || selectedDoc.numero,
-          details: `Campos modificados diretamente por ${currentUser?.name} (${currentUser?.role})`,
+          recordTitle: saveNumero || selectedDoc.numero,
+          details: `Campos e documentos modificados por ${currentUser?.name || 'Administrador'}`,
         });
-      }
 
-      setIsSaving(false);
-      // Requirement 7.2: No error, no "nada mudou" warning, standard success confirmation!
-      success('Alterações salvas com sucesso!');
+        setIsSaving(false);
+        success('Alterações salvas com sucesso!');
+      }
     }, 350);
+  };
+
+  const handleBackToList = () => {
+    setSelectedDoc(null);
+    setIsNewRecord(false);
+    setIsPdfBlurred(true);
+    setManagedFiles([]);
   };
 
   // Replace PDF file handler (Requirement 8)
@@ -285,6 +458,21 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
   // Helper to format heading for any municipal document type
   const getDocHeading = (doc: DocumentoOficialDTO | null) => {
     if (!doc) return '';
+
+    // Specialized Licitações naming: Modalidade + número + "/" + ano
+    if (groupId === 'licitacoes' || doc.groupId === 'licitacoes') {
+      const detailed = licitacoesConfigService.getLicitacaoDetalhada(doc.id);
+      const modalidades = licitacoesConfigService.getModalidades();
+      const modalidadeNome =
+        modalidades.find((m) => m.id === detailed?.modalidadeId)?.nome ||
+        (doc as any).modalidade ||
+        doc.categoria ||
+        'Pregão Eletrônico';
+      const cleanNum = extractSimpleNumber(detailed?.numero || doc.numeroSimples || doc.numero);
+      const ano = detailed?.ano || doc.ano || '2026';
+      return cleanNum ? `${modalidadeNome} nº ${cleanNum}/${ano}` : `${modalidadeNome} - ${ano}`;
+    }
+
     const num = doc.numero;
     if (
       num.toLowerCase().includes('port') || 
@@ -459,8 +647,8 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
             {selectedDoc && (
               <>
                 <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-                <span className="font-bold text-slate-900">
-                  {getDocHeading(selectedDoc)}
+                <span className="font-bold text-slate-900 truncate max-w-[180px] sm:max-w-xs">
+                  {isNewRecord ? `Nova ${getSingularTitle()}` : getDocHeading(selectedDoc)}
                 </span>
               </>
             )}
@@ -596,40 +784,64 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                 )}
               </div>
 
-              {/* Reload / Refresh data */}
-              <button
-                type="button"
-                onClick={() => refetch()}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-sm transition cursor-pointer"
-                title="Atualizar dados da tabela"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
-                <span>ATUALIZAR</span>
-              </button>
-
-              {/* Export button */}
-              <button
-                type="button"
-                onClick={handleExportList}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-sm transition cursor-pointer ml-auto"
-              >
-                <span>EXPORTAR</span>
-                <Download className="w-3.5 h-3.5 text-slate-500" />
-              </button>
-
-              {/* Administrative Action: + Adicionar Registro (Requirement 6) */}
-              {canCreate && (
+              {/* Action buttons group with responsive wrapping */}
+              <div className="flex items-center gap-2 flex-wrap sm:ml-auto">
+                {/* Reload / Refresh data */}
                 <button
                   type="button"
-                  onClick={() => setCreateModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-sm transition cursor-pointer shadow-xs ml-2"
-                  style={{ backgroundColor: theme.primaryHex }}
-                  title="Cadastrar nova publicação no módulo"
+                  onClick={() => refetch()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-sm transition cursor-pointer"
+                  title="Atualizar dados da tabela"
                 >
-                  <PlusCircle className="w-3.5 h-3.5" />
-                  <span>ADICIONAR</span>
+                  <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>ATUALIZAR</span>
                 </button>
-              )}
+
+                {/* Export button */}
+                <button
+                  type="button"
+                  onClick={handleExportList}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-sm transition cursor-pointer"
+                >
+                  <span>EXPORTAR</span>
+                  <Download className="w-3.5 h-3.5 text-slate-500" />
+                </button>
+
+                {/* Licitações Alerts and Notifications Central */}
+                {groupId === 'licitacoes' && (
+                  <LicitacoesAlertsPopover
+                    alerts={licitacoesAlerts}
+                    onSelectLicitacao={handleSelectDocById}
+                  />
+                )}
+
+                {/* Licitações Admin Configurations Gear */}
+                {groupId === 'licitacoes' && (canEdit || canCreate) && (
+                  <button
+                    type="button"
+                    onClick={() => setIsConfigModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-sm transition cursor-pointer"
+                    title="Configurações Administrativas do Módulo de Licitações"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="hidden sm:inline">CONFIGURAÇÕES</span>
+                  </button>
+                )}
+
+                {/* Administrative Action: + Adicionar Registro na própria página individual */}
+                {canCreate && (
+                  <button
+                    type="button"
+                    onClick={handleStartNewPublication}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-sm transition cursor-pointer shadow-xs"
+                    style={{ backgroundColor: theme.primaryHex }}
+                    title="Cadastrar nova publicação no módulo"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>ADICIONAR</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Helper status text */}
@@ -700,15 +912,18 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 
             {/* Table: SEPARATED ONLY BY HORIZONTAL LINES! */}
             {!isLoading && !isError && !isEmpty && (
-              <div className="w-full overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+              <div className="w-full overflow-x-auto rounded-lg border border-slate-200 shadow-2xs">
+                <table className="w-full text-left border-collapse min-w-[720px]">
                   {/* Header with metallic gradient */}
                   <thead>
                     <tr className="bg-gradient-to-b from-[#e5e7eb] to-[#d1d5db] border-y border-slate-300 text-slate-700 text-xs font-bold shadow-2xs">
                       <th className="py-2.5 px-4 w-32 whitespace-nowrap">Número</th>
-                      <th className="py-2.5 px-4 w-36 whitespace-nowrap">Seção</th>
-                      <th className="py-2.5 px-4 w-28 whitespace-nowrap">Assinatura</th>
-                      <th className="py-2.5 px-4">Ementa</th>
+                      <th className="py-2.5 px-4 w-36 whitespace-nowrap">{groupId === 'licitacoes' ? 'Modalidade' : 'Seção'}</th>
+                      <th className="py-2.5 px-4 w-28 whitespace-nowrap">{groupId === 'licitacoes' ? 'Abertura' : 'Assinatura'}</th>
+                      <th className="py-2.5 px-4">{groupId === 'licitacoes' ? 'Objeto da Licitação' : 'Ementa'}</th>
+                      {groupId === 'licitacoes' && (
+                        <th className="py-2.5 px-4 w-32 whitespace-nowrap">Situação</th>
+                      )}
                       <th className="py-2.5 px-4 w-28 text-right whitespace-nowrap">Ação</th>
                     </tr>
                   </thead>
@@ -731,7 +946,7 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                           {doc.numero}
                         </td>
                         <td className="py-3 px-4 text-slate-500 whitespace-nowrap">
-                          {doc.secao || '-'}
+                          {groupId === 'licitacoes' ? (doc.categoria || doc.secao || 'Pregão') : (doc.secao || '-')}
                         </td>
                         <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
                           {doc.assinatura}
@@ -739,6 +954,11 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
                         <td className="py-3 px-4 text-slate-700 leading-snug uppercase group-hover:text-slate-900">
                           {doc.ementa}
                         </td>
+                        {groupId === 'licitacoes' && (
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <AppStatusBadge status={getSituacaoName(doc)} size="sm" />
+                          </td>
+                        )}
                         <td className="py-3 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
@@ -828,522 +1048,56 @@ export const GroupDetailView: React.FC<GroupDetailViewProps> = ({
             {/* Horizontal Line below navigation arrows */}
             <hr className="border-t border-slate-200" />
 
-            {/* Split Screen Layout (Left: PDF Viewer | Right: Document Details) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start min-h-[580px]">
-              
-              {/* LEFT COLUMN: PDF Viewer or MultiDocumentList depending on Module (Requirement 8 & 9) */}
-              <div className="lg:col-span-6 flex flex-col justify-between space-y-4">
-                
-                {groupId === 'licitacoes' || groupId === 'contratos' ? (
-                  <MultiDocumentList
-                    publicationTitle={selectedDoc.ementa}
-                    publicationNumber={selectedDoc.numero}
-                    groupId={groupId}
-                    primaryColor={theme.primaryHex}
-                  />
-                ) : (
-                  <>
-                    <div className="space-y-3">
-                      {/* ANEXO Header Bar (Gradient gray matching Image 3) */}
-                      <div className="bg-gradient-to-b from-[#e5e7eb] to-[#d1d5db] border border-slate-300 py-1.5 px-4 text-center font-bold text-xs text-slate-700 tracking-wider">
-                        ANEXO
-                      </div>
-
-                  {/* Attachment Box with Menu Dropdown (Matching Image 3 & following group theme) */}
-                  <div className="relative">
-                    <div 
-                      className="p-3 rounded-xs flex items-center justify-between border"
-                      style={{ 
-                        backgroundColor: theme.softBgHex, 
-                        borderColor: theme.softBorderHex 
-                      }}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                        <button
-                          type="button"
-                          onClick={() => setAttachmentMenuOpen(!attachmentMenuOpen)}
-                          className="p-1 hover:bg-black/5 rounded cursor-pointer transition text-slate-700"
-                          title="Opções do anexo"
-                        >
-                          <Menu className="w-4 h-4" />
-                        </button>
-                        <span className="text-xs sm:text-[13px] font-semibold text-slate-800 truncate">
-                          {selectedDoc.anexoNome}
-                        </span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDownload(selectedDoc)}
-                        disabled={isDownloading}
-                        className="p-1 text-slate-600 hover:text-slate-900 cursor-pointer transition shrink-0"
-                        title="Baixar arquivo"
-                      >
-                        <Download className={`w-4 h-4 ${isDownloading ? 'animate-bounce' : ''}`} />
-                      </button>
-                    </div>
-
-                    {/* Admin PDF Controls (Requirement 8) */}
-                    {(canReplaceFiles || canDeleteFiles) && (
-                      <div className="flex items-center gap-2 pt-0.5">
-                        {canReplaceFiles && (
-                          <button
-                            type="button"
-                            onClick={handleReplacePdf}
-                            className="flex-1 py-1.5 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                            title="Substituir este arquivo PDF oficial"
-                          >
-                            <Upload className="w-3.5 h-3.5 text-amber-700" />
-                            <span>Substituir PDF</span>
-                          </button>
-                        )}
-                        {canDeleteFiles && (
-                          <button
-                            type="button"
-                            onClick={handleRemovePdf}
-                            className="py-1.5 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-                            title="Remover anexo do documento"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Remover</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Dropdown Menu (Visualizar / Baixar) */}
-                    {attachmentMenuOpen && (
-                      <div className="absolute top-12 left-2 z-30 bg-white border border-slate-200 shadow-lg rounded-sm py-1 w-36 text-xs text-slate-700">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsPdfBlurred(false);
-                            setAttachmentMenuOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-slate-500" />
-                          <span>Visualizar</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleDownload(selectedDoc);
-                            setAttachmentMenuOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 cursor-pointer"
-                        >
-                          <Download className="w-3.5 h-3.5 text-slate-500" />
-                          <span>Baixar</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* PDF Viewer Container (A4 Ratio Sheet Preview with Controls & Blur Effect) */}
-                  <div className="border border-slate-300 rounded-xs bg-[#525659] p-3 shadow-inner">
-                    
-                    {/* PDF Viewer Top Controls Bar */}
-                    <div className="bg-[#323639] text-white px-3 py-1.5 rounded-t-xs flex items-center justify-between text-xs mb-2">
-                      <div className="flex items-center gap-2 text-slate-300">
-                        <FileText className="w-4 h-4 text-emerald-400" />
-                        <span className="truncate max-w-[180px]">{selectedDoc.anexoNome}</span>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <button 
-                          type="button"
-                          onClick={() => setPdfZoom(z => Math.max(70, z - 10))}
-                          className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white"
-                          title="Diminuir Zoom"
-                        >
-                          <ZoomOut className="w-3.5 h-3.5" />
-                        </button>
-                        <span className="text-[11px] font-mono text-slate-300">{pdfZoom}%</span>
-                        <button 
-                          type="button"
-                          onClick={() => setPdfZoom(z => Math.min(150, z + 10))}
-                          className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white"
-                          title="Aumentar Zoom"
-                        >
-                          <ZoomIn className="w-3.5 h-3.5" />
-                        </button>
-                        <button 
-                          type="button"
-                          onClick={() => setPdfRotation(r => (r + 90) % 360)}
-                          className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white"
-                          title="Girar"
-                        >
-                          <RotateCw className="w-3.5 h-3.5" />
-                        </button>
-                        <button 
-                          type="button"
-                          onClick={handlePrint}
-                          className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white"
-                          title="Imprimir"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* PDF Sheet Preview Area */}
-                    <div className="relative bg-white rounded-xs p-6 shadow-md min-h-[460px] max-h-[540px] overflow-hidden flex flex-col justify-between">
-                      
-                      {/* Document Body (Subject to Blur effect until unlocked by user click) */}
-                      <div 
-                        className={`transition-all duration-300 select-none ${
-                          isPdfBlurred ? 'filter blur-md opacity-40' : 'filter-none opacity-100'
-                        }`}
-                        style={{
-                          transform: `scale(${pdfZoom / 100}) rotate(${pdfRotation}deg)`,
-                          transformOrigin: 'top center'
-                        }}
-                      >
-                        {/* Municipal Document Formal Header */}
-                        <div className="text-center pb-4 border-b border-slate-300 space-y-1">
-                          <div className="w-10 h-10 mx-auto mb-1">
-                            <Brasao className="w-full h-full object-contain" />
-                          </div>
-                          <h4 className="text-[11px] font-bold text-slate-800 tracking-wider">
-                            ESTADO DO TOCANTINS
-                          </h4>
-                          <h3 className="text-xs font-extrabold text-slate-900 tracking-wide">
-                            PREFEITURA MUNICIPAL DE SÃO MIGUEL DO TOCANTINS
-                          </h3>
-                          <p className="text-[9.5px] text-slate-500 uppercase">
-                            CNPJ: {siteConfig.cnpj} • Gabinete do Prefeito
-                          </p>
-                        </div>
-
-                        {/* Document Content / Text Body */}
-                        <div className="py-4 space-y-3 text-[11px] text-slate-800 leading-relaxed font-serif">
-                          <div className="text-center font-bold font-sans text-xs pb-1" style={{ color: theme.primaryHex }}>
-                            {getDocHeading(selectedDoc).toUpperCase()}
-                          </div>
-
-                          <div className="text-right text-[10px] text-slate-600 italic pl-24">
-                            &quot;{selectedDoc.ementa}&quot;
-                          </div>
-
-                          <div className="pt-2 text-justify space-y-2 whitespace-pre-line">
-                            {selectedDoc.textoIntegral ? (
-                              selectedDoc.textoIntegral
-                            ) : (
-                              <>
-                                <p>
-                                  O PREFEITO MUNICIPAL DE SÃO MIGUEL DO TOCANTINS, Estado do Tocantins, no uso de suas atribuições legais e constitucionais que lhe são conferidas pela Lei Orgânica do Município;
-                                </p>
-                                <p>
-                                  CONSIDERANDO a necessidade pública e a estrita observância aos princípios da legalidade, publicidade, transparência e eficiência insculpidos no art. 37 da Constituição Federal;
-                                </p>
-                                <p className="font-semibold text-center py-1">
-                                  D E C R E T A / R E S O L V E:
-                                </p>
-                                <p>
-                                  Art. 1º Fica homologado e publicado no Diário Oficial o presente ato de {selectedDoc.numero}, com efeitos imediatos a partir de {selectedDoc.assinatura}.
-                                </p>
-                                <p>
-                                  Art. 2º Revogam-se as disposições em contrário.
-                                </p>
-                              </>
-                            )}
-                          </div>
-
-                          {/* Signature stamp */}
-                          <div className="pt-8 text-center space-y-0.5">
-                            <div className="w-48 border-t border-slate-700 mx-auto mb-1" />
-                            <div className="font-bold font-sans text-xs text-slate-900">
-                              {selectedDoc.signatario}
-                            </div>
-                            <div className="text-[10px] text-slate-500 font-sans">
-                              {selectedDoc.cargoSignatario}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Digital Verification Bar */}
-                        <div className="mt-4 pt-2 border-t border-slate-200 flex items-center justify-between text-[9px] text-slate-400 font-mono">
-                          <div className="flex items-center gap-1 text-emerald-700 font-sans font-bold">
-                            <FileCheck className="w-3.5 h-3.5" />
-                            <span>DOCUMENTO ASSINADO DIGITALMENTE (ICP-BRASIL)</span>
-                          </div>
-                          <span>CHAVE: 2026.SMT.9482.01B7</span>
-                        </div>
-                      </div>
-
-                      {/* BLUR OVERLAY WITH UNLOCK BUTTON (Matching Requirement 7) */}
-                      {isPdfBlurred && (
-                        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-slate-900/30 backdrop-blur-[3px] transition-all">
-                          <div className="bg-white/95 backdrop-blur-md p-6 rounded-xl shadow-2xl border border-slate-200/80 max-w-xs text-center space-y-3">
-                            <div 
-                              className="w-12 h-12 rounded-full flex items-center justify-center mx-auto shadow-2xs"
-                              style={{ backgroundColor: theme.softBgHex, color: theme.primaryHex }}
-                            >
-                              <Shield className="w-6 h-6 stroke-[2.2]" />
-                            </div>
-                            <h4 className="font-bold text-sm text-slate-800">
-                              Visualizador de Documento
-                            </h4>
-                            <p className="text-xs text-slate-500 leading-snug">
-                              O conteúdo oficial deste ato municipal está protegido contra visualização acidental.
-                            </p>
-                            <button
-                              type="button"
-                              onClick={handleUnlockBlur}
-                              disabled={isUnblurring}
-                              style={{ backgroundColor: theme.primaryHex }}
-                              className="w-full text-white py-2.5 px-4 rounded-md font-bold text-xs shadow-md hover:opacity-90 active:scale-95 transition cursor-pointer flex items-center justify-center gap-2"
-                            >
-                              {isUnblurring ? (
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Eye className="w-4 h-4" />
-                              )}
-                              <span>{isUnblurring ? 'Desbloqueando...' : 'VISUALIZAR DOCUMENTO'}</span>
-                            </button>
-                            <div className="text-[10.5px] text-slate-400">
-                              Arquivo: {selectedDoc.anexoTamanho}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                    </div>
-
-                  </div>
-                </div>
-
-                {/* Left Column Bottom: Download File Action */}
-                <button
-                  type="button"
-                  onClick={() => handleDownload(selectedDoc)}
-                  disabled={isDownloading}
-                  className="w-full py-2 px-4 rounded-sm border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
-                >
-                  <Download className={`w-4 h-4 ${isDownloading ? 'animate-bounce text-emerald-600' : 'text-slate-500'}`} />
-                  <span>{isDownloading ? 'Baixando...' : `Baixar Arquivo Completo (${selectedDoc.anexoTamanho})`}</span>
-                </button>
-              </>
-            )}
-
-          </div>
-
-              {/* RIGHT COLUMN: Document Metadata with Horizontal Lines (Image 3) */}
-              <div className="lg:col-span-6 flex flex-col justify-between space-y-6">
-                
-                <div className="space-y-4">
-                  
-                  {/* Administrative Top Bar: DIRECT EDITING ENABLED (Requirement 7: No "Editar" button required!) */}
-                  {canEdit && (
-                    <div className="bg-emerald-50 border border-emerald-200/90 rounded-xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
-                        <div>
-                          <div className="text-xs font-extrabold text-emerald-950">
-                            Modo Administrativo: Edição Direta Habilitada
-                          </div>
-                          <div className="text-[11px] text-emerald-700">
-                            Clique diretamente nos campos abaixo para alterar e clique em Salvar
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleSaveDoc}
-                        disabled={isSaving}
-                        className="px-4 py-2 bg-[#0b5444] hover:bg-[#084336] disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5 shrink-0"
-                      >
-                        {isSaving ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Check className="w-3.5 h-3.5" />
-                        )}
-                        <span>{isSaving ? 'Salvando...' : 'Salvar Alterações'}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Document Title Heading in Group Color (Image 3) */}
-                  <div>
-                    <h2 
-                      className="text-xl sm:text-2xl font-bold tracking-tight"
-                      style={{ color: theme.primaryHex }}
-                    >
-                      {getDocHeading(selectedDoc)}
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Publicação Oficial no Portal da Transparência de São Miguel do Tocantins
-                    </p>
-                  </div>
-
-                  {/* Metadata Table / Items separated ONLY by horizontal lines (Image 3) */}
-                  <div className="divide-y divide-slate-200 text-xs sm:text-[13px]">
-                    
-                    {/* Número */}
-                    <div className="py-2.5 flex items-center justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Número:</span>
-                      {canEdit ? (
-                        <input
-                          type="text"
-                          value={editNumero}
-                          onChange={(e) => setEditNumero(e.target.value)}
-                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded font-mono font-bold text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                        />
-                      ) : (
-                        <span className="text-slate-700 font-mono font-medium">{selectedDoc.numero}</span>
-                      )}
-                    </div>
-
-                    {/* Ano */}
-                    <div className="py-2.5 flex items-center justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Ano:</span>
-                      {canEdit ? (
-                        <input
-                          type="number"
-                          value={editAno}
-                          onChange={(e) => setEditAno(e.target.value)}
-                          className="w-28 px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                        />
-                      ) : (
-                        <span className="text-slate-700">{selectedDoc.ano}</span>
-                      )}
-                    </div>
-
-                    {/* Seção */}
-                    <div className="py-2.5 flex items-center justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Seção:</span>
-                      {canEdit ? (
-                        <input
-                          type="text"
-                          value={editSecao}
-                          onChange={(e) => setEditSecao(e.target.value)}
-                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                        />
-                      ) : (
-                        <span className="text-slate-700">{selectedDoc.secao || '-'}</span>
-                      )}
-                    </div>
-
-                    {/* Assinatura */}
-                    <div className="py-2.5 flex items-center justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Assinatura:</span>
-                      {canEdit ? (
-                        <input
-                          type="date"
-                          value={editAssinatura}
-                          onChange={(e) => setEditAssinatura(e.target.value)}
-                          className="w-36 px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                        />
-                      ) : (
-                        <span className="text-slate-700">{selectedDoc.assinatura}</span>
-                      )}
-                    </div>
-
-                    {/* Ementa */}
-                    <div className="py-2.5 flex items-start justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0 pt-1">Ementa:</span>
-                      {canEdit ? (
-                        <textarea
-                          rows={3}
-                          value={editEmenta}
-                          onChange={(e) => setEditEmenta(e.target.value)}
-                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none uppercase leading-relaxed font-sans"
-                        />
-                      ) : (
-                        <span className="text-slate-700 uppercase leading-relaxed text-justify flex-1">
-                          {selectedDoc.ementa}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Signatário */}
-                    <div className="py-2.5 flex items-center justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Signatário:</span>
-                      {canEdit ? (
-                        <input
-                          type="text"
-                          value={editSignatario}
-                          onChange={(e) => setEditSignatario(e.target.value)}
-                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                        />
-                      ) : (
-                        <span className="text-slate-700 font-medium">{selectedDoc.signatario}</span>
-                      )}
-                    </div>
-
-                    {/* Cargo do Signatário */}
-                    <div className="py-2.5 flex items-center justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Cargo:</span>
-                      {canEdit ? (
-                        <input
-                          type="text"
-                          value={editCargo}
-                          onChange={(e) => setEditCargo(e.target.value)}
-                          className="w-full max-w-sm px-2.5 py-1 bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
-                        />
-                      ) : (
-                        <span className="text-slate-600">{selectedDoc.cargoSignatario}</span>
-                      )}
-                    </div>
-
-                    {/* Órgão Emissor */}
-                    <div className="py-2.5 flex items-center justify-between gap-4">
-                      <span className="font-bold text-slate-800 w-32 shrink-0">Órgão Emissor:</span>
-                      <span className="text-slate-600">Prefeitura Municipal de São Miguel do Tocantins</span>
-                    </div>
-
-                  </div>
-
-                </div>
-
-                {/* Right Column Bottom: VOLTAR & SALVAR Buttons (Matching Image 3 & Requirement 7) */}
-                <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedDoc(null);
-                      setIsPdfBlurred(true);
-                    }}
-                    className="w-full sm:w-auto px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-sm transition cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>VOLTAR PARA A LISTA</span>
-                  </button>
-
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={handleSaveDoc}
-                      disabled={isSaving}
-                      className="w-full sm:w-auto px-6 py-2.5 bg-[#0b5444] hover:bg-[#084336] disabled:opacity-60 text-white font-bold text-xs rounded-sm transition cursor-pointer flex items-center justify-center gap-2 shadow-xs"
-                    >
-                      {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                      <span>{isSaving ? 'Salvando alterações...' : 'SALVAR ALTERAÇÕES'}</span>
-                    </button>
-                  )}
-                </div>
-
-              </div>
-
-            </div>
+            {/* Unified Continuous Workspace: Shared between Visitors and Administrators */}
+            <AdminPublicationWorkspace
+                files={managedFiles}
+                onFilesChange={setManagedFiles}
+                primaryColor={theme.primaryHex}
+                moduleLabel={getSingularTitle()}
+                isNewRecord={isNewRecord}
+                selectedDoc={selectedDoc}
+                docHeading={getDocHeading(selectedDoc)}
+                editNumero={editNumero}
+                setEditNumero={setEditNumero}
+                editAssinatura={editAssinatura}
+                setEditAssinatura={setEditAssinatura}
+                editCovid={editCovid}
+                setEditCovid={setEditCovid}
+                editSecao={editSecao}
+                setEditSecao={setEditSecao}
+                editEmenta={editEmenta}
+                setEditEmenta={setEditEmenta}
+                editTipoRelacao={editTipoRelacao}
+                setEditTipoRelacao={setEditTipoRelacao}
+                editAtosLeis={editAtosLeis}
+                setEditAtosLeis={setEditAtosLeis}
+                editSignatario={editSignatario}
+                setEditSignatario={setEditSignatario}
+                editCargo={editCargo}
+                setEditCargo={setEditCargo}
+                onBack={handleBackToList}
+                onSave={handleSaveDoc}
+                isSaving={isSaving}
+                groupId={groupId}
+                onNavigateToContrato={(id) => onSelectAnotherGroup('contratos', undefined, id)}
+                readOnly={!canEdit && !canCreate && !isNewRecord}
+                isPdfBlurred={isPdfBlurred}
+                onUnlockBlur={handleUnlockBlur}
+              />
 
           </div>
         )}
 
       </div>
 
-      {/* Create Publication Modal (Requirement 11) */}
-      <CreatePublicationModal
-        isOpen={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-        defaultModule={groupId}
-        defaultTab={activeTab}
-        onSuccessCreated={(newDoc) => {
-          setLocalDocs(prev => [newDoc, ...prev]);
-        }}
-      />
+      {/* Licitações Admin Configurations Modal */}
+      {groupId === 'licitacoes' && (
+        <LicitacoesConfigModal
+          isOpen={isConfigModalOpen}
+          onClose={() => setIsConfigModalOpen(false)}
+          onConfigUpdated={() => refetch()}
+        />
+      )}
 
     </div>
   );
